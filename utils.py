@@ -11,15 +11,6 @@ warnings.filterwarnings("ignore")
 rng = np.random.default_rng()
 
 def load_data_from_csv(file_path):
-    """
-    Загрузка данных из CSV-файла.
-    
-    Параметры:
-    - file_path: Путь к CSV-файлу.
-    
-    Возвращает:
-    - I: Массив измеренных интенсивностей флуоресценции (4 x N).
-    """
     data = pd.read_csv(file_path,
                    sep=';',
                    header=None,
