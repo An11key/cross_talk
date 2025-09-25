@@ -1,18 +1,18 @@
 # Импорты из seq_utils
-from .utils.seq_utils import estimate_crosstalk, deleteCrossTalk, baseline_cor
+from .seq_utils import estimate_crosstalk, deleteCrossTalk, baseline_cor
 
 # Импорты из load_utils
-from .utils.load_utils import load_data_from_csv, load_dataframe_by_path
+from .load_utils import load_data_from_csv, load_dataframe_by_path
 
 # Импорты из generate_utils
-from .utils.generate_utils import (
+from .generate_utils import (
     getTestData,
     getCrossTalk,
     getCrossTalkColumn,
 )
 
 # Импорты из utils
-from .utils.utils import smooth_func
+from .utils import smooth_func
 
 __all__ = [
     "estimate_crosstalk",

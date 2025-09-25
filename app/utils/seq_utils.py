@@ -27,7 +27,15 @@ from peakutils import baseline
 import statsmodels.api as sm
 
 
-def estimate_crosstalk(data, bins=300, epsilon=0.05, iter=11, show_fig=False):
+def estimate_crosstalk(
+    data,
+    bins=300,
+    epsilon=0.05,
+    iter=11,
+    show_fig=False,
+    progress_callback=None,
+    iteration_callback=None,
+):
     """
     Итеративная оценка матрицы перекрестных помех между каналами флуоресценции.
 
@@ -43,6 +51,10 @@ def estimate_crosstalk(data, bins=300, epsilon=0.05, iter=11, show_fig=False):
         iter (int, optional): Максимальное количество итераций. По умолчанию 11
         show_fig (bool, optional): Показывать ли графики в процессе итераций.
                                  По умолчанию False
+        progress_callback (callable, optional): Функция обратного вызова для отправки прогресса.
+                                               Принимает (progress_percent, message)
+        iteration_callback (callable, optional): Функция обратного вызова для сохранения данных итерации.
+                                                Принимает (iteration_num, iteration_data)
 
     Returns:
         np.ndarray: Нормализованная матрица перекрестных помех размером 4x4,
@@ -56,10 +68,24 @@ def estimate_crosstalk(data, bins=300, epsilon=0.05, iter=11, show_fig=False):
     data = data
     names = data.columns
     iteration = 1
-    while iteration < iter:
 
+    # Определяем названия каналов для сообщений
+    channel_names = ["A", "C", "G", "T"]
+
+    # Отправляем начальный прогресс
+    if progress_callback:
+        progress_callback(0, "Начало оценки перекрестных помех")
+
+    max_iterations = iter - 1  # iteration < iter, так что максимум iter-1
+    total_operations = max_iterations * 4 * 3  # итерации × каналы × пары
+    current_operation = 0
+
+    while iteration < iter:
         slopes = []
         W_estim = np.eye(4)
+
+        # Данные текущей итерации для callback
+        iteration_data = {}
 
         if show_fig:
             fig, axs = plt.subplots(2, 3)
@@ -67,10 +93,27 @@ def estimate_crosstalk(data, bins=300, epsilon=0.05, iter=11, show_fig=False):
             plt.show()
 
         for i in range(4):
+            channel_i_name = channel_names[i]
 
             for j in range(4):
                 if i is j:
                     continue
+
+                channel_j_name = channel_names[j]
+                current_operation += 1
+
+                # Отправляем прогресс для текущей операции
+                if progress_callback:
+                    iteration_progress = (iteration - 1) / max_iterations
+                    channel_progress = (
+                        i * 3 + (j if j < i else j - 1)
+                    ) / 12  # 0-11 для 12 пар
+                    total_progress = (
+                        iteration_progress + channel_progress / max_iterations
+                    ) * 100
+
+                    message = f"Итерация {iteration}/{max_iterations} | Анализ {channel_i_name} vs {channel_j_name}"
+                    progress_callback(min(total_progress, 95), message)
 
                 data_x = data[names[i]]
 
@@ -79,6 +122,8 @@ def estimate_crosstalk(data, bins=300, epsilon=0.05, iter=11, show_fig=False):
 
                 filt_data = data[(data_x >= q1) & (data_x <= q2)]
                 result_data = filt_data[[names[i], names[j]]]
+
+                # Продолжаем обычную логику для расчёта коэффициентов
                 bins = len(result_data.index) // 8
                 intervals = np.array_split(result_data, bins)
                 min_rows = []
@@ -97,14 +142,44 @@ def estimate_crosstalk(data, bins=300, epsilon=0.05, iter=11, show_fig=False):
                 interc, slope = l1_regression(x, y, 0.5)
                 W_estim[j, i] = slope
                 slopes.append(slope)
-        if abs(max(slopes)) < epsilon:
-            break
-        data = (np.linalg.inv(W_estim) @ data.T).T
 
+                # Сохраняем все точки и рассчитанный slope для visualization callback
+                if iteration_callback is not None and not data.empty:
+                    x_all = data[names[i]].values
+                    y_all = data[names[j]].values
+                    iteration_data[(i, j)] = {
+                        "x_data": x_all,
+                        "y_data": y_all,
+                        "slope": slope,
+                        "intercept": interc,
+                    }
+
+        # Отправляем данные итерации в callback
+        if iteration_callback is not None and iteration_data:
+            iteration_callback(iteration, iteration_data)
+
+        if abs(max(slopes)) < epsilon:
+            if progress_callback:
+                progress_callback(95, f"Достигнута сходимость на итерации {iteration}")
+            break
+
+        data = (np.linalg.inv(W_estim) @ data.T).T
         data.columns = names
         iteration += 1
         W = W @ W_estim
+
+        # Отправляем прогресс после каждой итерации
+        if progress_callback:
+            iteration_progress = min(iteration / max_iterations * 100, 95)
+            message = f"Завершена итерация {iteration-1}/{max_iterations}"
+            progress_callback(iteration_progress, message)
+
     W = W / W.sum(axis=0)
+
+    # Отправляем финальный прогресс
+    if progress_callback:
+        progress_callback(100, "Оценка перекрестных помех завершена")
+
     return W
 
 
@@ -164,7 +239,16 @@ def l1_regression(x, y, q):
     return result.params
 
 
-def deleteCrossTalk(data, M=None, rem_base=True, smooth_data=True):
+def deleteCrossTalk(
+    data,
+    M=None,
+    rem_base=False,
+    smooth_data=False,
+    progress_callback=None,
+    iteration_callback=None,
+    window_size=21,
+    polyorder=3,
+):
     """
     Основная функция устранения перекрестных помех из данных флуоресценции.
 
@@ -180,6 +264,14 @@ def deleteCrossTalk(data, M=None, rem_base=True, smooth_data=True):
                                  По умолчанию False
         smooth_data (bool, optional): Выполнять ли сглаживание данных.
                                     По умолчанию False
+        progress_callback (callable, optional): Функция обратного вызова для отправки прогресса.
+                                               Принимает (progress_percent, message)
+        iteration_callback (callable, optional): Функция обратного вызова для сохранения данных итерации.
+                                                Принимает (iteration_num, iteration_data)
+        window_size (int, optional): Размер окна для сглаживания Савицкого-Голея.
+                                   Должен быть нечетным числом. По умолчанию 21
+        polyorder (int, optional): Порядок полинома для сглаживания Савицкого-Голея.
+                                 Должен быть меньше window_size. По умолчанию 3
 
     Returns:
         pd.DataFrame: Очищенные от перекрестных помех данные с теми же названиями колонок
@@ -193,14 +285,37 @@ def deleteCrossTalk(data, M=None, rem_base=True, smooth_data=True):
         >>> # Полная обработка с коррекцией базовой линии и сглаживанием
     """
 
+    # Этап 1: Сглаживание данных
     if smooth_data:
-        data = smooth_func(data, window_size=21)
+        if progress_callback:
+            progress_callback(10, "Сглаживание данных...")
+        data = smooth_func(data, window_size=window_size, polyorder=polyorder)
+
+    # Этап 2: Коррекция базовой линии
     if rem_base:
+        if progress_callback:
+            progress_callback(30, "Коррекция базовой линии...")
         data = baseline_cor(data)
+
+    # Этап 3: Оценка матрицы перекрестных помех
     if M is None:
-        M = estimate_crosstalk(data)
+        if progress_callback:
+            progress_callback(50, "Оценка матрицы перекрестных помех...")
+        M = estimate_crosstalk(
+            data,
+            progress_callback=progress_callback,
+            iteration_callback=iteration_callback,
+        )
+
+    # Этап 4: Устранение перекрестных помех
+    if progress_callback:
+        progress_callback(95, "Устранение перекрестных помех...")
 
     names = data.columns
     data = (np.linalg.inv(M) @ data.T).T
     data.columns = names
+
+    if progress_callback:
+        progress_callback(100, "Обработка завершена")
+
     return data

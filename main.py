@@ -1,11 +1,17 @@
-from app.utils.load_utils import load_data_from_csv
-from app import estimate_crosstalk
+import sys
+import os
 
-# Пример использования
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from PySide6.QtWidgets import QApplication
+from app.ui.main_window import MyMenu
+
+
+def main() -> None:
+    app = QApplication(sys.argv)
+    menu = MyMenu()
+    menu.show()
+    app.exec()
+
+
 if __name__ == "__main__":
-
-    data = load_data_from_csv("data/2_pGEM_G2_PDMA6_36.csv")
-    # data = baseline_cor(data)
-    estimated_W = estimate_crosstalk(data)
-    print("Оцененная матрица перекрестных помех:")
-    print(estimated_W)
+    main()
