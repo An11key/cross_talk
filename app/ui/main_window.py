@@ -52,6 +52,7 @@ class MyMenu(QMainWindow):
         self.downsample_slider: QWidget
         self.downsample_auto_button: QWidget
         self.disable_downsample_checkbox: QWidget
+        self.downsample_control_panel: QWidget
         self.iterations_widget: Optional[QWidget]
 
         # Настройки
@@ -119,14 +120,16 @@ class MyMenu(QMainWindow):
         """Создание основных UI компонентов."""
         self.ui_factory.create_list_widget()
         self.ui_factory.create_plot_tabs()
-        downsample_control_panel = self.ui_factory.create_downsample_control_panel()
+        self.downsample_control_panel = (
+            self.ui_factory.create_downsample_control_panel()
+        )
 
         # Создаем правую часть с графиками и управлением
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.addWidget(self.view_tabs)
-        right_layout.addWidget(downsample_control_panel)
+        right_layout.addWidget(self.downsample_control_panel)
 
         # Добавляем виджеты в splitter
         self.main_splitter.addWidget(self.list_widget)
@@ -176,6 +179,17 @@ class MyMenu(QMainWindow):
         # Применяем тёмную тему по умолчанию
         self.theme_manager.apply_dark_theme()
 
+        # Устанавливаем начальное состояние панели детализации
+        detail_panel_visible = self.settings.value(
+            "detail_panel_visible", False, type=bool
+        )
+        if detail_panel_visible:
+            self.downsample_control_panel.show()
+            self.toggle_detail_action.setText("Скрыть детализацию")
+        else:
+            self.downsample_control_panel.hide()
+            self.toggle_detail_action.setText("Показать детализацию")
+
         # Автоматически загружаем файлы из processed_sequences
         self.file_manager.load_processed_files()
 
@@ -206,6 +220,17 @@ class MyMenu(QMainWindow):
     def toggle_theme(self) -> None:
         """Переключает между светлой и тёмной темой."""
         self.theme_manager.toggle_theme()
+
+    def toggle_detail_panel(self) -> None:
+        """Переключает видимость панели детализации."""
+        if self.downsample_control_panel.isVisible():
+            self.downsample_control_panel.hide()
+            self.toggle_detail_action.setText("Показать детализацию")
+            self.settings.setValue("detail_panel_visible", False)
+        else:
+            self.downsample_control_panel.show()
+            self.toggle_detail_action.setText("Скрыть детализацию")
+            self.settings.setValue("detail_panel_visible", True)
 
     # --- Обработка данных ---
 

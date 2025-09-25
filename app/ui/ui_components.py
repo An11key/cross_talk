@@ -90,6 +90,15 @@ class UIComponentsFactory:
         # Разделитель
         view_menu.addSeparator()
 
+        # Действие переключения видимости панели детализации
+        self.parent.toggle_detail_action = view_menu.addAction("Показать детализацию")
+        self.parent.toggle_detail_action.triggered.connect(
+            self.parent.toggle_detail_panel
+        )
+
+        # Разделитель
+        view_menu.addSeparator()
+
         # Действие сброса размеров панелей
         self.parent.reset_layout_action = view_menu.addAction(
             "Сбросить размеры панелей"
