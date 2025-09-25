@@ -19,11 +19,11 @@ CrossTalkAnalyzer — это настольное приложение с гра
 
 ## Установка на macOS/Linux
 
-### Windows
+-   ### Windows
 
-1. **Установите .exe файл из _Releases_**
+    -   **Установите .exe файл из _Releases_**
 
-### macOS/Linux
+-   ### macOS/Linux
 
 1. **Клонируйте репозиторий**/**Скачайте соответствующий Source code из _Releases_**:
 
