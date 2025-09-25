@@ -2,7 +2,9 @@
 
 Программа для анализа и обработки нуклеотидных последовательностей с функцией удаления перекрестных помех.
 
-<img width="1177" height="662" alt="readme_talk" src="https://github.com/user-attachments/assets/ccc044e9-1ffe-4004-9439-ad7a0a042f4e" />
+ ![Главное окно](https://github.com/user-attachments/assets/ccc044e9-1ffe-4004-9439-ad7a0a042f4e)
+
+ [Пример работы](https://github.com/user-attachments/assets/ba498953-f71c-4fd2-8218-8aa12392e74b)
 
 ## Описание
 
