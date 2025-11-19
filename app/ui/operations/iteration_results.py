@@ -236,6 +236,7 @@ class IterationResultsWidget(QWidget):
             # Получаем данные для этой пары каналов
             # Ищем данные как для (i,j), так и для (j,i)
             x_data, y_data, slope, intercept = None, None, None, None
+            x_regression, y_regression = None, None
             swap_axes = False
 
             if (i, j) in current_data:
@@ -244,6 +245,9 @@ class IterationResultsWidget(QWidget):
                 y_data = data_dict["y_data"]
                 slope = data_dict["slope"]
                 intercept = data_dict["intercept"]
+                # Извлекаем точки регрессии если есть
+                x_regression = data_dict.get("x_regression_points", None)
+                y_regression = data_dict.get("y_regression_points", None)
             elif (j, i) in current_data:
                 # Если есть обратная пара, меняем местами x и y
                 data_dict = current_data[(j, i)]
@@ -256,6 +260,9 @@ class IterationResultsWidget(QWidget):
                 else:
                     slope = 0
                     intercept = data_dict["intercept"]
+                # Меняем местами точки регрессии тоже
+                x_regression = data_dict.get("y_regression_points", None)
+                y_regression = data_dict.get("x_regression_points", None)
                 swap_axes = True
 
             if x_data is not None and y_data is not None:
@@ -305,10 +312,32 @@ class IterationResultsWidget(QWidget):
                     name=f"{channel_i} vs {channel_j}",
                 )
 
+                # Отображаем точки регрессии отдельно, если они есть
+                if (
+                    x_regression is not None
+                    and y_regression is not None
+                    and len(x_regression) > 0
+                    and len(y_regression) > 0
+                ):
+                    # Используем яркий цвет для точек регрессии в зависимости от пары каналов
+                    regression_color = self._get_regression_color(i, j, theme)
+                    plot_widget.plot(
+                        x_regression,
+                        y_regression,
+                        pen=None,
+                        symbol="s",  # Квадратные символы для точек регрессии
+                        symbolBrush=regression_color,
+                        symbolSize=4,  # Больше размер для лучшей видимости
+                        symbolPen=pg.mkPen(color="white", width=1),  # Белая обводка
+                        name=f"{channel_i} vs {channel_j} (регрессия)",
+                    )
+
                 # Для регрессии используем рассчитанные коэффициенты из L1 регрессии
                 if slope is not None and intercept is not None:
+                    # Используем тот же яркий цвет для линии регрессии
+                    regression_color = self._get_regression_color(i, j, theme)
                     self._add_regression_line_with_coeffs(
-                        plot_widget, x_data, y_data, color, slope, intercept
+                        plot_widget, x_data, y_data, regression_color, slope, intercept
                     )
             else:
                 # Если данных нет, показываем компактный заголовок
@@ -331,11 +360,31 @@ class IterationResultsWidget(QWidget):
         return "dark"
 
     def _get_color_for_pair(self, i: int, j: int, theme: str) -> str:
-        """Получает цвет для пары каналов в зависимости от темы."""
+        """Получает нейтральный светло-серый цвет для всех точек."""
+        # Используем светло-серый цвет для всех точек независимо от темы
         if theme == "white":
-            colors = ["#CC0000", "#006600", "#000080", "#CC6600"]
+            return "#B0B0B0"  # Светло-серый для светлой темы
         else:
-            colors = ["r", "g", "b", "y"]
+            return "#808080"  # Средне-серый для темной темы
+
+    def _get_regression_color(self, i: int, j: int, theme: str) -> str:
+        """Получает яркий цвет для точек регрессии в зависимости от пары каналов."""
+        if theme == "white":
+            # Яркие цвета для светлой темы
+            colors = [
+                "#FF0000",
+                "#00AA00",
+                "#0066FF",
+                "#FF8800",
+            ]  # Красный, Зеленый, Синий, Оранжевый
+        else:
+            # Яркие цвета для темной темы
+            colors = [
+                "#FF6666",
+                "#66FF66",
+                "#6666FF",
+                "#FFFF66",
+            ]  # Светло-красный, Светло-зеленый, Светло-синий, Светло-желтый
 
         # Используем цвет первого канала (i)
         return colors[i % len(colors)]

@@ -35,3 +35,12 @@ def smooth_func(data, window_size=15, polyorder=3):
     for column in data.columns:
         smoothed_data[column] = savgol_filter(data[column], window_size, polyorder)
     return smoothed_data
+
+
+def get_matrix_difference(matrix1, matrix2):
+    if matrix1 is None or matrix2 is None:
+        return None
+    a = matrix1
+    b = matrix2
+    diff = np.abs(a - b).mean()
+    return diff

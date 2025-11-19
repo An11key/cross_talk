@@ -38,6 +38,8 @@ class UIComponentsFactory:
         """Создаёт левый список файлов и подключает события клика и ПКМ."""
         self.parent.list_widget = QListWidget()
         self.parent.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)  # type: ignore
+        # Включаем режим множественного выбора
+        self.parent.list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         return self.parent.list_widget
 
     def create_progress_panel(self):
@@ -79,8 +81,17 @@ class UIComponentsFactory:
         file_menu = menu_bar.addMenu("&File")
         action1 = file_menu.addAction("Open")
         action2 = file_menu.addAction("Generate test data")
+        
+        # Разделитель
+        file_menu.addSeparator()
+        
+        # Экспорт статистики
+        action3 = file_menu.addAction("Статистика")
+        action3.setToolTip("Экспортировать всю статистику в CSV файл")
+        
         action1.triggered.connect(self.parent.open_action)
         action2.triggered.connect(self.parent.generate_test_data)
+        action3.triggered.connect(self.parent.export_statistics)
 
         # Меню View
         view_menu = menu_bar.addMenu("&View")
@@ -114,8 +125,12 @@ class UIComponentsFactory:
         self.parent.view_tabs = QTabWidget()
         self.parent.raw_plot_widget = pg.PlotWidget()
         self.parent.view_tabs.addTab(self.parent.raw_plot_widget, "Raw")
+        self.parent.rwb_plot_widget = None  # появится при клике на файл
         self.parent.clean_plot_widget = None  # появится после обработки
         self.parent.iterations_widget = None  # появится после обработки
+        self.parent.convergence_widget = None  # появится после обработки
+        self.parent.matrix_widget = None  # появится после обработки
+        self.parent.info_widget = None  # появится при клике на файл
 
         # Включаем контекстное меню для вкладок
         self.parent.view_tabs.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -193,36 +208,26 @@ class UIComponentsFactory:
         self.parent.downsample_slider.setTickInterval(10)
         layout.addWidget(self.parent.downsample_slider)
 
-        # Метка значения
-        self.parent.downsample_value_label = QLabel("1x (полные данные)")
-        self.parent.downsample_value_label.setStyleSheet(
-            "font-size: 11px; min-width: 120px;"
-        )
-        layout.addWidget(self.parent.downsample_value_label)
-
         # Кнопка "Авто"
         auto_button = QPushButton("Авто")
         auto_button.setFixedWidth(60)
         auto_button.setToolTip("Автоматическое прореживание для производительности")
         layout.addWidget(auto_button)
 
-        # Флажок отключения прореживания
-        self.parent.disable_downsample_checkbox = QCheckBox("Полные данные")
-        self.parent.disable_downsample_checkbox.setToolTip(
-            "Полностью отключить прореживание данных"
-        )
-        self.parent.disable_downsample_checkbox.setChecked(False)
-        layout.addWidget(self.parent.disable_downsample_checkbox)
+        # Чекбокс "Отключить прореживание"
+        disable_checkbox = QCheckBox("Отключить")
+        disable_checkbox.setToolTip("Полностью отключить прореживание данных")
+        layout.addWidget(disable_checkbox)
 
         # Устанавливаем соотношение размеров
         layout.setStretchFactor(downsample_label, 0)
         layout.setStretchFactor(self.parent.downsample_slider, 3)
-        layout.setStretchFactor(self.parent.downsample_value_label, 0)
         layout.setStretchFactor(auto_button, 0)
-        layout.setStretchFactor(self.parent.disable_downsample_checkbox, 0)
+        layout.setStretchFactor(disable_checkbox, 0)
 
-        # Сохраняем ссылку на кнопку авто
+        # Сохраняем ссылки
         self.parent.downsample_auto_button = auto_button
+        self.parent.disable_downsample_checkbox = disable_checkbox
 
         return control_panel
 

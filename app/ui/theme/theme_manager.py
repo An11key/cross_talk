@@ -83,8 +83,23 @@ class ThemeManager:
             else:
                 self.parent.clean_plot_widget.setBackground("default")
 
+        if self.parent.rwb_plot_widget:
+            if background_color:
+                self.parent.rwb_plot_widget.setBackground(background_color)
+            else:
+                self.parent.rwb_plot_widget.setBackground("default")
+
         if self.parent.iterations_widget:
             self.parent.iterations_widget.apply_theme(theme)
+
+        if self.parent.convergence_widget:
+            self.parent.convergence_widget.apply_theme(theme)
+
+        if self.parent.matrix_widget:
+            self.parent.matrix_widget.apply_theme(theme)
+
+        if self.parent.info_widget:
+            self.parent.info_widget.apply_theme(theme)
 
         # Сохраняем текущую тему для использования при отрисовке
         self.current_plot_theme = theme
@@ -98,4 +113,4 @@ class ThemeManager:
         current_item = self.parent.list_widget.currentItem()
         if current_item:
             # Симулируем клик по текущему элементу для перерисовки
-            self.parent.file_list_click(current_item)
+            self.parent.plot_manager.file_list_click(current_item)

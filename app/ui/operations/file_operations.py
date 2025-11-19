@@ -121,7 +121,7 @@ class FileOperationsManager:
 
     def generate_test_data(self):
         """Запрашивает параметры и генерирует тестовые данные, добавляя их в список."""
-        from app.ui.dialogs import ask_test_data_params
+        from app.ui.dialogs.dialogs import ask_test_data_params
 
         params = ask_test_data_params(self.parent)
         if params is None:
@@ -168,49 +168,99 @@ class FileOperationsManager:
         """Удаляет файл из списка и соответствующую папку из processed_sequences."""
         name = item.text()
 
+        # Получаем базовое имя файла для очистки связанных данных
+        base_name = os.path.splitext(name)[0]
+
         # Получаем путь к исходному файлу
         if self.parent.registry.has_file(name):
             file_path = self.parent.registry.get_path(name)
 
             # Удаляем обработанные файлы из processed_sequences
-            delete_processed_sequence(file_path)
+            deleted = delete_processed_sequence(file_path)
+            print(
+                f"Удаление папки для {name}: {'успешно' if deleted else 'не удалось'}"
+            )
+
+        # Удаляем данные итераций для этого файла и, если нужно, вкладку iterations
+        self.parent.plot_manager.clear_iteration_data(base_name)
+
+        # Очищаем кэши для данного файла и связанных clean файлов
+        self.parent.plot_manager.clear_cache_for_file(name)
+
+        # Также очищаем кэши для потенциальных clean файлов
+        clean_candidates = [f"{base_name}_clean.csv", f"{base_name}_clean.srd"]
+        for clean_name in clean_candidates:
+            self.parent.plot_manager.clear_cache_for_file(clean_name)
+
+        # Удаляем clean вкладку, если текущий файл связан с ней
+        if (
+            hasattr(self.parent.plot_manager, "current_clean_file_base")
+            and self.parent.plot_manager.current_clean_file_base == base_name
+        ):
+            self.parent.plot_manager.remove_clean_tab()
 
         # Удаляем из списка и реестра
         self.parent.list_widget.takeItem(self.parent.list_widget.row(item))
         self.parent.registry.remove(name)
 
         # Также удаляем связанный clean файл из реестра, если он есть
-        base_name = os.path.splitext(name)[0]
         clean_candidates = [f"{base_name}_clean.csv", f"{base_name}_clean.srd"]
         for clean_name in clean_candidates:
             if self.parent.registry.has_file(clean_name):
                 self.parent.registry.remove(clean_name)
 
+    def delete_selected_files(self):
+        """Удаляет все выбранные файлы из списка."""
+        selected_items = self.parent.list_widget.selectedItems()
+        
+        if not selected_items:
+            return
+        
+        # Копируем список, так как будем удалять элементы в процессе
+        items_to_delete = list(selected_items)
+        
+        for item in items_to_delete:
+            self.delete_file(item)
+
     def show_context_menu(self, pos):
-        """Контекстное меню по ПКМ: содержит пункт "Запуск" для обработки файла."""
+        """Контекстное меню по ПКМ: содержит пункты для работы с файлами."""
         item = self.parent.list_widget.itemAt(pos)
         if not item:
             return
 
         menu = QMenu(self.parent)
-        file_name = item.text()
-
-        # Основные действия
-        action = menu.addAction("Запуск")
-        action.triggered.connect(lambda: self.parent.file_process(file_name))
-
-        # Проверяем, есть ли clean данные для этого файла
-        base_name = self._get_base_name(file_name)
-        has_clean_data = self._check_has_clean_data(base_name)
-
-        if has_clean_data:
+        selected_items = self.parent.list_widget.selectedItems()
+        
+        # Если выбрано несколько файлов
+        if len(selected_items) > 1:
+            # Пакетные операции
+            menu.addAction("Обработать выбранные").triggered.connect(
+                lambda: self.parent.process_selected_files()
+            )
             menu.addSeparator()
-            clean_action = menu.addAction("Удалить обработанные данные")
-            clean_action.triggered.connect(lambda: self._remove_clean_data(base_name))
+            menu.addAction("Удалить выбранные").triggered.connect(
+                lambda: self.delete_selected_files()
+            )
+        else:
+            # Операции с одним файлом
+            file_name = item.text()
 
-        menu.addSeparator()
-        action2 = menu.addAction("Удалить файл")
-        action2.triggered.connect(lambda: self.parent.delete_file(item))
+            # Основные действия
+            action = menu.addAction("Запуск")
+            action.triggered.connect(lambda: self.parent.file_process(file_name))
+
+            # Проверяем, есть ли clean данные для этого файла
+            base_name = self._get_base_name(file_name)
+            has_clean_data = self._check_has_clean_data(base_name)
+
+            if has_clean_data:
+                menu.addSeparator()
+                clean_action = menu.addAction("Удалить обработанные данные")
+                clean_action.triggered.connect(lambda: self._remove_clean_data(base_name))
+
+            menu.addSeparator()
+            action2 = menu.addAction("Удалить файл")
+            action2.triggered.connect(lambda: self.parent.delete_file(item))
 
         menu.exec(self.parent.list_widget.mapToGlobal(pos))
 

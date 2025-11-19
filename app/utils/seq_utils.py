@@ -27,12 +27,169 @@ from peakutils import baseline
 import statsmodels.api as sm
 
 
+def estimate_crosstalk_2(
+    data,
+    epsilon=0.005,
+    iter=11,
+    progress_callback=None,
+    iteration_callback=None,
+):
+    """
+    Альтернативный метод итеративной оценки матрицы перекрестных помех.
+
+    Использует упрощенный подход без разбиения на интервалы, работает напрямую
+    с отфильтрованными данными для более быстрой оценки.
+
+    Args:
+        data (pd.DataFrame): Данные флуоресценции с колонками для каждого канала (A, G, C, T)
+        bins (int, optional): Параметр для совместимости. По умолчанию 300
+        epsilon (float, optional): Критерий сходимости. По умолчанию 0.005
+        iter (int, optional): Максимальное количество итераций. По умолчанию 11
+        progress_callback (callable, optional): Функция обратного вызова для отправки прогресса.
+                                               Принимает (progress_percent, message)
+        iteration_callback (callable, optional): Функция обратного вызова для сохранения данных итерации.
+                                                Принимает (iteration_num, iteration_data)
+
+    Returns:
+        np.ndarray: Нормализованная матрица перекрестных помех размером 4x4
+    """
+    W = np.eye(4)
+    names = data.columns
+    iteration = 1
+
+    # Определяем названия каналов для сообщений
+    channel_names = ["A", "G", "C", "T"]
+
+    # Отправляем начальный прогресс
+    if progress_callback:
+        progress_callback(0, "Начало оценки перекрестных помех (метод 2)")
+
+    max_iterations = iter - 1  # iteration < iter, так что максимум iter-1
+    current_operation = 0
+
+    while iteration < iter:
+        W_estim = np.eye(4)
+        slopes = []
+
+        # Данные текущей итерации для callback
+        iteration_data = {}
+
+        for i in range(4):
+            for j in range(4):
+                if i is j:
+                    continue
+
+                current_operation += 1
+                # Отправляем прогресс для текущей операции
+                if progress_callback:
+                    iteration_progress = (iteration - 1) / max_iterations
+                    channel_progress = (
+                        i * 3 + (j if j < i else j - 1)
+                    ) / 12  # 0-11 для 12 пар
+                    total_progress = (
+                        iteration_progress + channel_progress / max_iterations
+                    ) * 100
+
+                    message = f"Итерация {iteration}/{max_iterations} | Анализ {channel_names[i]} vs {channel_names[j]}"
+                    progress_callback(min(total_progress, 95), message)
+
+                name_x = names[i]
+                name_y = names[j]
+                q1 = data[name_x].quantile(0.6)
+                q2 = data[name_x].quantile(0.99)
+                filt_data = data[(data[name_x] >= q1) & (data[name_x] <= q2)]
+                filt_data = filt_data[filt_data[name_x] == filt_data.max(axis=1)]
+
+                # Проверяем, что есть достаточно данных для обработки
+                if len(filt_data.index) == 0:
+                    continue
+
+                # bins = max(1, len(filt_data.index) // 8)  # Минимум 1
+                # intervals = np.array_split(filt_data, bins)
+                # max_rows = []
+                # for interval in intervals:
+                #     if not interval.empty:
+                #         average_x = interval[name_x].mean()
+                #         average_y = interval[name_y].mean()
+                #         if average_x > average_y:
+                #             max_index = interval[name_y].idxmin()
+                #             max_rows.append(interval.loc[max_index])
+                #         else:
+                #             continue
+                # if not max_rows:
+                #     continue
+                # max_df = pd.DataFrame(max_rows)
+                # x = max_df[name_x]
+                # y = max_df[name_y]
+                x = filt_data[name_x]
+                y = filt_data[name_y]
+
+                # Проверяем, что есть минимум 2 точки для регрессии
+                if len(x) < 2:
+                    continue
+
+                try:
+                    interc, slope = l1_regression(x, y, 0.5)
+                    W_estim[j, i] = slope
+                    slopes.append(slope)
+                except Exception as e:
+                    print(
+                        f"[WARNING] Ошибка регрессии для {channel_names[i]} vs {channel_names[j]}: {e}"
+                    )
+                    continue
+
+                # Сохраняем все точки и рассчитанный slope для visualization callback
+                if iteration_callback is not None and not data.empty:
+                    x_all = data[name_x].values
+                    y_all = data[name_y].values
+
+                    # Получаем координаты точек регрессии
+                    x_regression = x.values if len(x) > 0 else np.array([])
+                    y_regression = y.values if len(y) > 0 else np.array([])
+
+                    iteration_data[(i, j)] = {
+                        "x_data": x_all,
+                        "y_data": y_all,
+                        "x_regression_points": x_regression,
+                        "y_regression_points": y_regression,
+                        "slope": slope,
+                        "intercept": interc,
+                    }
+
+        # Отправляем данные итерации в callback
+        if iteration_callback is not None and iteration_data:
+            iteration_callback(iteration, iteration_data)
+
+        if abs(max(slopes)) < epsilon:
+            if progress_callback:
+                progress_callback(95, f"Достигнута сходимость на итерации {iteration}")
+            break
+
+        data = (np.linalg.inv(W_estim) @ data.T).T
+        data.columns = names
+        W = W @ W_estim
+        iteration += 1
+
+        # Отправляем прогресс после каждой итерации
+        if progress_callback:
+            iteration_progress = min(iteration / max_iterations * 100, 95)
+            message = f"Завершена итерация {iteration-1}/{max_iterations}"
+            progress_callback(iteration_progress, message)
+
+    W = W / W.sum(axis=0)
+
+    # Отправляем финальный прогресс
+    if progress_callback:
+        progress_callback(100, "Оценка перекрестных помех завершена (метод 2)")
+
+    return W
+
+
 def estimate_crosstalk(
     data,
     bins=300,
-    epsilon=0.05,
+    epsilon=0.01,
     iter=11,
-    show_fig=False,
     progress_callback=None,
     iteration_callback=None,
 ):
@@ -44,7 +201,7 @@ def estimate_crosstalk(
     минимальных значений в интервалах высоких сигналов для каждой пары каналов.
 
     Args:
-        data (pd.DataFrame): Данные флуоресценции с колонками для каждого канала (A, C, G, T)
+        data (pd.DataFrame): Данные флуоресценции с колонками для каждого канала (A, G, C, T)
         bins (int, optional): Количество интервалов для разбиения данных. По умолчанию 300
         epsilon (float, optional): Критерий сходимости - максимальное изменение наклонов.
                                  По умолчанию 0.05
@@ -70,7 +227,7 @@ def estimate_crosstalk(
     iteration = 1
 
     # Определяем названия каналов для сообщений
-    channel_names = ["A", "C", "G", "T"]
+    channel_names = ["A", "G", "C", "T"]
 
     # Отправляем начальный прогресс
     if progress_callback:
@@ -87,21 +244,12 @@ def estimate_crosstalk(
         # Данные текущей итерации для callback
         iteration_data = {}
 
-        if show_fig:
-            fig, axs = plt.subplots(2, 3)
-            makeFig(data, axs, 0, 1)
-            plt.show()
-
         for i in range(4):
-            channel_i_name = channel_names[i]
-
             for j in range(4):
                 if i is j:
                     continue
 
-                channel_j_name = channel_names[j]
                 current_operation += 1
-
                 # Отправляем прогресс для текущей операции
                 if progress_callback:
                     iteration_progress = (iteration - 1) / max_iterations
@@ -112,44 +260,72 @@ def estimate_crosstalk(
                         iteration_progress + channel_progress / max_iterations
                     ) * 100
 
-                    message = f"Итерация {iteration}/{max_iterations} | Анализ {channel_i_name} vs {channel_j_name}"
+                    message = f"Итерация {iteration}/{max_iterations} | Анализ {channel_names[i]} vs {channel_names[j]}"
                     progress_callback(min(total_progress, 95), message)
 
-                data_x = data[names[i]]
+                name_x = names[i]
+                name_y = names[j]
 
-                q1 = data_x.quantile(0.6)
-                q2 = data_x.quantile(0.99)
+                q1 = data[name_x].quantile(0.6)
+                q2 = data[name_x].quantile(0.99)
 
-                filt_data = data[(data_x >= q1) & (data_x <= q2)]
-                result_data = filt_data[[names[i], names[j]]]
+                filt_data = data[(data[name_x] >= q1) & (data[name_x] <= q2)]
+                result_data = filt_data[[name_x, name_y]]
+
+                # Проверяем, что есть достаточно данных для обработки
+                if len(result_data.index) == 0:
+                    continue
 
                 # Продолжаем обычную логику для расчёта коэффициентов
-                bins = len(result_data.index) // 8
+                bins = max(1, len(result_data.index) // 8)  # Минимум 1
                 intervals = np.array_split(result_data, bins)
                 min_rows = []
 
                 for interval in intervals:
                     if not interval.empty:
-                        min_index = interval[names[j]].idxmin()
-                        min_rows.append(interval.loc[min_index])
+                        average_y = interval[name_y].mean()
+                        average_x = interval[name_x].mean()
+
+                        if average_x > average_y:
+                            min_index = interval[name_y].idxmin()
+                            min_rows.append(interval.loc[min_index])
+                        else:
+                            continue
                 if not min_rows:
                     continue
 
                 min_df = pd.DataFrame(min_rows)
-                x = min_df[names[i]]
-                y = min_df[names[j]]
+                x = min_df[name_x]
+                y = min_df[name_y]
 
-                interc, slope = l1_regression(x, y, 0.5)
-                W_estim[j, i] = slope
-                slopes.append(slope)
+                # Проверяем, что есть минимум 2 точки для регрессии
+                if len(x) < 2:
+                    continue
+
+                try:
+                    interc, slope = l1_regression(x, y, 0.5)
+                    W_estim[j, i] = slope
+                    slopes.append(slope)
+                except Exception as e:
+                    print(
+                        f"[WARNING] Ошибка регрессии для {channel_names[i]} vs {channel_names[j]}: {e}"
+                    )
+                    continue
 
                 # Сохраняем все точки и рассчитанный slope для visualization callback
                 if iteration_callback is not None and not data.empty:
-                    x_all = data[names[i]].values
-                    y_all = data[names[j]].values
+                    x_all = data[name_x].values
+                    y_all = data[name_y].values
+
+                    # Получаем координаты точек регрессии (минимумы из интервалов)
+                    x_regression = x.values if len(x) > 0 else np.array([])
+                    y_regression = y.values if len(y) > 0 else np.array([])
+
                     iteration_data[(i, j)] = {
                         "x_data": x_all,
                         "y_data": y_all,
+                        "x_regression_points": x_regression,
+                        "y_regression_points": y_regression,
                         "slope": slope,
                         "intercept": interc,
                     }
@@ -173,7 +349,6 @@ def estimate_crosstalk(
             iteration_progress = min(iteration / max_iterations * 100, 95)
             message = f"Завершена итерация {iteration-1}/{max_iterations}"
             progress_callback(iteration_progress, message)
-
     W = W / W.sum(axis=0)
 
     # Отправляем финальный прогресс
@@ -200,14 +375,17 @@ def baseline_cor(data, deg=6):
         pd.DataFrame: Данные с скорректированной базовой линией
 
     Note:
-        Функция модифицирует исходный DataFrame. Используется библиотека peakutils
+        Функция создает копию исходного DataFrame и возвращает скорректированную версию.
+        Исходные данные остаются без изменений. Используется библиотека peakutils
         для вычисления базовой линии методом ALS.
     """
-    for col in data.columns:
-        bl = baseline(data[col], deg)
-        data[col] = data[col] - bl
+    # Создаем копию данных, чтобы не модифицировать исходный DataFrame
+    data_corrected = data.copy()
+    for col in data_corrected.columns:
+        bl = baseline(data_corrected[col], deg)
+        data_corrected[col] = data_corrected[col] - bl
 
-    return data
+    return data_corrected
 
 
 def l1_regression(x, y, q):
@@ -225,7 +403,7 @@ def l1_regression(x, y, q):
                   q=0.5 соответствует медианной регрессии
 
     Returns:
-        array: Оценки параметров [intercept, slope]
+        tuple: (intercept, slope) - оценки параметров
 
     Note:
         Функция автоматически добавляет константу для оценки свободного члена.
@@ -233,10 +411,21 @@ def l1_regression(x, y, q):
     """
     x = np.array(x).reshape(-1, 1)
     y = np.array(y)
+
+    # Проверка на минимальное количество точек
+    if len(x) < 2:
+        raise ValueError("Недостаточно данных для регрессии (минимум 2 точки)")
+
     X = sm.add_constant(x)
     model = QuantReg(y, X)
-    result = model.fit(q=q)
-    return result.params
+    result = model.fit(q=q, max_iter=1000)
+    params = result.params
+
+    # Убеждаемся, что params содержит именно 2 значения
+    if len(params) != 2:
+        raise ValueError(f"Ожидалось 2 параметра, получено {len(params)}")
+
+    return params[0], params[1]  # intercept, slope
 
 
 def deleteCrossTalk(
@@ -248,6 +437,8 @@ def deleteCrossTalk(
     iteration_callback=None,
     window_size=21,
     polyorder=3,
+    return_matrix=False,
+    algorithm="estimate_crosstalk_2",
 ):
     """
     Основная функция устранения перекрестных помех из данных флуоресценции.
@@ -272,19 +463,21 @@ def deleteCrossTalk(
                                    Должен быть нечетным числом. По умолчанию 21
         polyorder (int, optional): Порядок полинома для сглаживания Савицкого-Голея.
                                  Должен быть меньше window_size. По умолчанию 3
+        return_matrix (bool, optional): Возвращать ли матрицу кросс-помех.
+                                       По умолчанию False
+        algorithm (str, optional): Алгоритм оценки кросс-помех: "estimate_crosstalk" или "estimate_crosstalk_2".
+                                  По умолчанию "estimate_crosstalk_2"
 
     Returns:
-        pd.DataFrame: Очищенные от перекрестных помех данные с теми же названиями колонок
+        pd.DataFrame или tuple: Очищенные от перекрестных помех данные с теми же названиями колонок.
+                               Если return_matrix=True, возвращает кортеж (data, matrix)
 
     Note:
         Порядок обработки: коррекция базовой линии -> сглаживание -> устранение перекрестных помех.
         Функция применяет обратную матрицу перекрестных помех для коррекции данных.
 
-    Example:
-        >>> clean_data = deleteCrossTalk(raw_data, rem_base=True, smooth_data=True)
-        >>> # Полная обработка с коррекцией базовой линии и сглаживанием
     """
-
+    clear_data = None
     # Этап 1: Сглаживание данных
     if smooth_data:
         if progress_callback:
@@ -301,21 +494,31 @@ def deleteCrossTalk(
     if M is None:
         if progress_callback:
             progress_callback(50, "Оценка матрицы перекрестных помех...")
-        M = estimate_crosstalk(
-            data,
-            progress_callback=progress_callback,
-            iteration_callback=iteration_callback,
-        )
+
+        # Выбираем алгоритм в зависимости от параметра
+        if algorithm == "estimate_crosstalk":
+            M = estimate_crosstalk(
+                data,
+                progress_callback=progress_callback,
+                iteration_callback=iteration_callback,
+            )
+        else:  # По умолчанию используем estimate_crosstalk_2
+            M = estimate_crosstalk_2(
+                data,
+                progress_callback=progress_callback,
+                iteration_callback=iteration_callback,
+            )
 
     # Этап 4: Устранение перекрестных помех
     if progress_callback:
         progress_callback(95, "Устранение перекрестных помех...")
-
-    names = data.columns
-    data = (np.linalg.inv(M) @ data.T).T
-    data.columns = names
+    if clear_data is None:
+        clear_data = (np.linalg.inv(M) @ data.T).T
+        clear_data.columns = data.columns
 
     if progress_callback:
         progress_callback(100, "Обработка завершена")
 
-    return data
+    if return_matrix:
+        return clear_data, M
+    return clear_data

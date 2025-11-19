@@ -47,19 +47,28 @@ def process_and_save(
     smooth_data: bool = True,
     remove_baseline: bool = True,
 ) -> tuple[pd.DataFrame, str]:
-    """Обрабатывает файл и сохраняет результат в organized структуре папок."""
+    """Обрабатывает файл и сохраняет результат в organized структуре папок.
+    
+    Если smooth_data=False и remove_baseline=False, предполагается что данные
+    уже обработаны и функция только сохраняет их на диск.
+    """
     # Создаём базовую папку для последовательностей
     if not os.path.exists(SEQUENCES_BASE_DIR):
         os.makedirs(SEQUENCES_BASE_DIR)
 
-    data_copy = data.copy()
+    # Если обработка не требуется (данные уже обработаны), просто используем их как есть
+    if not smooth_data and not remove_baseline:
+        clean_data = data
+    else:
+        # Иначе выполняем обработку
+        data_copy = data.copy()
 
-    # Применяем коррекцию базовой линии только если включена
-    if remove_baseline:
-        data_copy = baseline_cor(data_copy)
+        # Применяем коррекцию базовой линии только если включена
+        if remove_baseline:
+            data_copy = baseline_cor(data_copy)
 
-    # Обрабатываем данные с выбранными параметрами
-    clean_data = deleteCrossTalk(data_copy, rem_base=False, smooth_data=smooth_data)
+        # Обрабатываем данные с выбранными параметрами
+        clean_data = deleteCrossTalk(data_copy, rem_base=False, smooth_data=smooth_data)
 
     # Определяем папку для этой последовательности
     folder = get_sequence_folder(path)
@@ -117,6 +126,16 @@ def save_iteration_data(file_path: str, iteration_data: dict) -> str:
                     data_dict["y_data"].tolist()
                     if isinstance(data_dict["y_data"], np.ndarray)
                     else data_dict["y_data"]
+                ),
+                "x_regression_points": (
+                    data_dict["x_regression_points"].tolist()
+                    if isinstance(data_dict.get("x_regression_points"), np.ndarray)
+                    else data_dict.get("x_regression_points", [])
+                ),
+                "y_regression_points": (
+                    data_dict["y_regression_points"].tolist()
+                    if isinstance(data_dict.get("y_regression_points"), np.ndarray)
+                    else data_dict.get("y_regression_points", [])
                 ),
                 "slope": (
                     float(data_dict["slope"])
@@ -188,6 +207,12 @@ def load_iteration_data(file_path: str) -> tuple[bool, dict]:
                 iteration_data[iteration_num][(i, j)] = {
                     "x_data": np.array(data_dict["x_data"]),
                     "y_data": np.array(data_dict["y_data"]),
+                    "x_regression_points": np.array(
+                        data_dict.get("x_regression_points", [])
+                    ),
+                    "y_regression_points": np.array(
+                        data_dict.get("y_regression_points", [])
+                    ),
                     "slope": data_dict["slope"],
                     "intercept": data_dict["intercept"],
                 }

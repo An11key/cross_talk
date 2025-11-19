@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QFormLayout,
     QMessageBox,
+    QRadioButton,
+    QButtonGroup,
 )
 
 
@@ -51,13 +53,14 @@ class ProcessingOptionsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Параметры обработки")
         self.setModal(True)
-        self.setFixedSize(400, 300)
+        self.setFixedSize(400, 400)
 
         # Результат диалога
-        self.smooth_data = True
+        self.smooth_data = False  # По умолчанию отключено
         self.remove_baseline = True
         self.window_size = 21
         self.polyorder = 3
+        self.algorithms = ["estimate_crosstalk_2"]  # По умолчанию метод 2 (список)
 
         self.setup_ui()
 
@@ -74,13 +77,42 @@ class ProcessingOptionsDialog(QDialog):
         self.baseline_checkbox.setChecked(True)  # Включено по умолчанию
         layout.addWidget(self.baseline_checkbox)
 
+        # Группа для выбора алгоритма
+        algorithm_group = QGroupBox("Алгоритм оценки кросс-помех")
+        algorithm_layout = QVBoxLayout()
+
+        # Информационный текст
+        info_label = QLabel("Выберите один или оба алгоритма:")
+        info_label.setStyleSheet("font-style: italic; color: gray;")
+        algorithm_layout.addWidget(info_label)
+
+        # Чекбокс для метода 2
+        self.algorithm_2_checkbox = QCheckBox("Метод 2 (новый)")
+        self.algorithm_2_checkbox.setChecked(True)  # По умолчанию
+        self.algorithm_2_checkbox.setToolTip(
+            "Упрощенный метод без разбиения на интервалы.\n"
+            "Работает быстрее и хорошо подходит для большинства случаев."
+        )
+        algorithm_layout.addWidget(self.algorithm_2_checkbox)
+
+        # Чекбокс для метода 1
+        self.algorithm_1_checkbox = QCheckBox("Метод 1 (старый)")
+        self.algorithm_1_checkbox.setChecked(False)
+        self.algorithm_1_checkbox.setToolTip(
+            "Классический метод с разбиением на интервалы.\n" "Работает медленнее."
+        )
+        algorithm_layout.addWidget(self.algorithm_1_checkbox)
+
+        algorithm_group.setLayout(algorithm_layout)
+        layout.addWidget(algorithm_group)
+
         # Группа для настроек сглаживания
         smooth_group = QGroupBox("Сглаживание данных")
         smooth_layout = QVBoxLayout()
 
         # Чекбокс для включения сглаживания
         self.smooth_checkbox = QCheckBox("Включить сглаживание")
-        self.smooth_checkbox.setChecked(True)  # Включено по умолчанию
+        self.smooth_checkbox.setChecked(False)  # Отключено по умолчанию
         smooth_layout.addWidget(self.smooth_checkbox)
 
         # Параметры сглаживания
@@ -113,6 +145,8 @@ class ProcessingOptionsDialog(QDialog):
 
         # Связываем включение сглаживания с доступностью параметров
         self.smooth_checkbox.toggled.connect(params_widget.setEnabled)
+        # Отключаем параметры по умолчанию, так как сглаживание выключено
+        params_widget.setEnabled(False)
 
         smooth_group.setLayout(smooth_layout)
         layout.addWidget(smooth_group)
@@ -136,6 +170,22 @@ class ProcessingOptionsDialog(QDialog):
         """Сохраняет выбранные параметры и закрывает диалог."""
         self.smooth_data = self.smooth_checkbox.isChecked()
         self.remove_baseline = self.baseline_checkbox.isChecked()
+
+        # Сохраняем выбранные алгоритмы (список)
+        self.algorithms = []
+        if self.algorithm_1_checkbox.isChecked():
+            self.algorithms.append("estimate_crosstalk")
+        if self.algorithm_2_checkbox.isChecked():
+            self.algorithms.append("estimate_crosstalk_2")
+        
+        # Проверяем, что выбран хотя бы один алгоритм
+        if not self.algorithms:
+            QMessageBox.warning(
+                self,
+                "Алгоритм не выбран",
+                "Пожалуйста, выберите хотя бы один алгоритм обработки.",
+            )
+            return
 
         if self.smooth_data:
             # Получаем значения параметров
@@ -176,14 +226,17 @@ class ProcessingOptionsDialog(QDialog):
             self.window_size_spinbox.blockSignals(False)
 
 
-def ask_processing_options(parent: QWidget) -> Optional[Tuple[bool, bool, int, int]]:
+def ask_processing_options(
+    parent: QWidget,
+) -> Optional[Tuple[bool, bool, int, int, list]]:
     """Показывает диалог выбора опций обработки.
 
     Args:
         parent: Родительский виджет
 
     Returns:
-        Tuple (smooth_data, remove_baseline, window_size, polyorder) или None если отменено
+        Tuple (smooth_data, remove_baseline, window_size, polyorder, algorithms) или None если отменено
+        algorithms - это список из одного или двух алгоритмов
     """
     dialog = ProcessingOptionsDialog(parent)
     if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -192,5 +245,98 @@ def ask_processing_options(parent: QWidget) -> Optional[Tuple[bool, bool, int, i
             dialog.remove_baseline,
             dialog.window_size,
             dialog.polyorder,
+            dialog.algorithms,
         )
+    return None
+
+
+class BatchProcessingOptionsDialog(QDialog):
+    """Диалог для выбора опций пакетной обработки файлов."""
+
+    def __init__(self, parent: QWidget = None, file_count: int = 0):
+        super().__init__(parent)
+        self.setWindowTitle("Опции пакетной обработки")
+        self.setModal(True)
+        self.setFixedSize(400, 200)
+
+        # Результаты диалога
+        self.save_data = True
+        self.save_statistics = False
+        self.file_count = file_count
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Создает интерфейс диалога."""
+        layout = QVBoxLayout()
+
+        # Заголовок
+        title_label = QLabel(f"Будет обработано файлов: {self.file_count}")
+        title_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        layout.addWidget(title_label)
+
+        layout.addSpacing(10)
+
+        # Чекбокс для сохранения данных
+        self.save_data_checkbox = QCheckBox("Сохранять обработанные данные")
+        self.save_data_checkbox.setChecked(True)  # По умолчанию включено
+        self.save_data_checkbox.setToolTip(
+            "Сохранять обработанные .srd файлы на диск"
+        )
+        layout.addWidget(self.save_data_checkbox)
+
+        # Чекбокс для сохранения статистики
+        self.save_statistics_checkbox = QCheckBox("Сохранить статистику после обработки")
+        self.save_statistics_checkbox.setChecked(False)
+        self.save_statistics_checkbox.setToolTip(
+            "Автоматически сохранить статистику в папку statistics\n"
+            "после завершения обработки всех файлов"
+        )
+        layout.addWidget(self.save_statistics_checkbox)
+
+        layout.addSpacing(20)
+
+        # Кнопки
+        button_layout = QHBoxLayout()
+
+        ok_button = QPushButton("OK")
+        cancel_button = QPushButton("Отмена")
+
+        ok_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def accept(self):
+        """Сохраняет выбранные параметры и закрывает диалог."""
+        self.save_data = self.save_data_checkbox.isChecked()
+        self.save_statistics = self.save_statistics_checkbox.isChecked()
+
+        # Если ничего не выбрано, просто закрываем
+        if not self.save_data and not self.save_statistics:
+            self.reject()
+            return
+
+        super().accept()
+
+
+def ask_batch_processing_options(
+    parent: QWidget, file_count: int
+) -> Optional[Tuple[bool, bool]]:
+    """Показывает диалог выбора опций пакетной обработки.
+
+    Args:
+        parent: Родительский виджет
+        file_count: Количество файлов для обработки
+
+    Returns:
+        Tuple (save_data, save_statistics) или None если отменено
+    """
+    dialog = BatchProcessingOptionsDialog(parent, file_count)
+    if dialog.exec() == QDialog.DialogCode.Accepted:
+        return (dialog.save_data, dialog.save_statistics)
     return None

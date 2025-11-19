@@ -13,7 +13,7 @@
 - Обработка ошибок с подробными сообщениями
 
 Пример использования:
-    from app.ui.processing_thread import DataProcessingThread
+    from app.ui.processing.processing_thread import DataProcessingThread
 
     # Создание потока
     thread = DataProcessingThread(path, data, smooth_data=True, remove_baseline=True)
@@ -39,7 +39,9 @@ class DataProcessingThread(QThread):
 
     # Сигналы для обновления UI
     progress_updated = Signal(float, str)  # прогресс (0-100), сообщение
-    processing_finished = Signal(pd.DataFrame, str)  # результат, путь к файлу
+    processing_finished = Signal(
+        pd.DataFrame, str, object
+    )  # результат, путь к файлу, матрица
     processing_error = Signal(str)  # сообщение об ошибке
 
     def __init__(
@@ -50,6 +52,8 @@ class DataProcessingThread(QThread):
         remove_baseline=True,
         window_size=21,
         polyorder=3,
+        algorithm="estimate_crosstalk_2",
+        save_data=True,
     ):
         """
         Инициализация потока обработки данных.
@@ -61,6 +65,8 @@ class DataProcessingThread(QThread):
             remove_baseline (bool): Выполнять ли коррекцию базовой линии
             window_size (int): Размер окна для сглаживания
             polyorder (int): Порядок полинома для сглаживания
+            algorithm (str): Алгоритм оценки кросс-помех
+            save_data (bool): Сохранять ли обработанные данные на диск
         """
         super().__init__()
         self.path = path
@@ -69,6 +75,8 @@ class DataProcessingThread(QThread):
         self.remove_baseline = remove_baseline
         self.window_size = window_size
         self.polyorder = polyorder
+        self.algorithm = algorithm
+        self.save_data = save_data
         self.is_cancelled = False
 
     def cancel(self):
@@ -106,6 +114,12 @@ class DataProcessingThread(QThread):
                                 "y_data": data_dict["y_data"].tolist(),
                                 "slope": data_dict["slope"],
                                 "intercept": data_dict["intercept"],
+                                "x_regression_points": data_dict[
+                                    "x_regression_points"
+                                ].tolist(),
+                                "y_regression_points": data_dict[
+                                    "y_regression_points"
+                                ].tolist(),
                             }
                             for (i, j), data_dict in iteration_data.items()
                         },
@@ -116,7 +130,7 @@ class DataProcessingThread(QThread):
                 )  # -1 как специальный код
 
             # Запускаем полную обработку с отслеживанием прогресса
-            clean_data = deleteCrossTalk(
+            clean_data, crosstalk_matrix = deleteCrossTalk(
                 self.data,
                 M=None,
                 rem_base=self.remove_baseline,
@@ -125,21 +139,33 @@ class DataProcessingThread(QThread):
                 iteration_callback=iteration_callback,
                 window_size=self.window_size,
                 polyorder=self.polyorder,
+                return_matrix=True,
+                algorithm=self.algorithm,
             )
 
             if self.is_cancelled:
                 return
 
-            # Сохранение результатов
-            self.progress_updated.emit(98, "Сохранение результатов...")
-            if self.is_cancelled:
-                return
+            # Сохранение результатов (только если включена опция)
+            if self.save_data:
+                self.progress_updated.emit(98, "Сохранение результатов...")
+                if self.is_cancelled:
+                    return
 
-            clean_data_result, clean_path = process_and_save(
-                self.path, clean_data, smooth_data=False, remove_baseline=False
-            )
+                clean_data_result, clean_path = process_and_save(
+                    self.path, clean_data, smooth_data=False, remove_baseline=False
+                )
 
-            self.processing_finished.emit(clean_data_result, clean_path)
+                self.processing_finished.emit(
+                    clean_data_result, clean_path, crosstalk_matrix
+                )
+            else:
+                # Не сохраняем на диск, но все равно отправляем результаты
+                self.progress_updated.emit(98, "Обработка завершена (без сохранения)")
+                # Используем путь к исходному файлу как "путь" для результата
+                self.processing_finished.emit(
+                    clean_data, self.path, crosstalk_matrix
+                )
 
         except Exception as e:
             self.processing_error.emit(f"Ошибка при обработке: {str(e)}")
